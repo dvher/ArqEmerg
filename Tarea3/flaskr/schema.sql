@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS Location (
     name TEXT NOT NULL,
     country TEXT NOT NULL,
     city TEXT NOT NULL,
-    meta TEXT NOT NULL,
+    meta TEXT,
     FOREIGN KEY (company_id) REFERENCES Company(id)
 );
 
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS Sensor (
     location_id INTEGER NOT NULL,
     name TEXT NOT NULL,
     category TEXT NOT NULL,
-    meta TEXT NOT NULL,
+    meta TEXT,
     api_key TEXT NOT NULL,
     FOREIGN KEY (location_id) REFERENCES Location(id)
 );

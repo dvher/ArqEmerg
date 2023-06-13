@@ -21,7 +21,7 @@ def token_required(f):
             data=jwt.decode(token, current_app.config["SECRET_KEY"], algorithms=["HS256"])
             db=get_db()
             current_user=db.execute(
-                "SELECT * FROM User WHERE id = ? AND username = ?", (data["user_id"], data["username"])
+                "SELECT * FROM Admin WHERE username = ?", (data["username"],)
             ).fetchone()
             if current_user is None:
                 return {
@@ -32,8 +32,7 @@ def token_required(f):
         except Exception as e:
             return {
                 "message": "Something went wrong",
-                "data": None,
-                "error": str(e)
+                "data": None
             }, 500
 
         return f(*args, **kwargs)

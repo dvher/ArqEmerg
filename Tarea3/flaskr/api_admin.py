@@ -1,5 +1,5 @@
 from flask import (
-    Blueprint, flash, g, redirect, render_template, request, url_for, jsonify, Response
+    Blueprint, request, jsonify, make_response
 )
 
 from flaskr.db import get_db
@@ -8,7 +8,7 @@ from flaskr.auth_middleware import token_required
 
 from werkzeug.security import check_password_hash
 
-from jwt import JWT
+import jwt
 
 import os
 
@@ -16,8 +16,9 @@ v1_adm = Blueprint('api_adminv1', __name__, url_prefix='/api/v1/admin')
 
 @v1_adm.route('login', methods=('POST',))
 def login():
-    username = request.form.get('username')
-    password = request.form.get('password')
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
 
     if username is None or password is None:
         return jsonify({'error': 'username and password are required'}), 400
@@ -25,7 +26,7 @@ def login():
     db = get_db()
 
     user = db.execute(
-        'SELECT * FROM User WHERE username = ?', (username,)
+        'SELECT * FROM Admin WHERE username = ?', (username,)
     ).fetchone()
 
     if user is None:
@@ -33,17 +34,18 @@ def login():
     
     if not check_password_hash(user['password'], password):
         return jsonify({'error': 'password is invalid'}), 400
+
     
-    token = JWT().encode({
-        'user_id': user['id'],
-        'username': user['username']
+    token = jwt.encode({
+        'username': user['username'],
+        'id': db.cursor().lastrowid
     },
     os.environ.get('SECRET_KEY', default='dev'),
     algorithm='HS256')
     
-    resp = Response(status=200, headers={
-        'Authorization': 'Bearer ' + token
-    })
+    resp = make_response(jsonify({'message': 'Login successful'}), 200)
+
+    resp.headers['Authorization'] = 'Bearer ' + token
 
     return resp
 
@@ -63,6 +65,8 @@ def company():
             if company is None:
                 return jsonify({'error': 'company id is invalid'}), 400
 
+            company = dict(company)
+
             return jsonify(company), 200
         
         db = get_db()
@@ -70,6 +74,8 @@ def company():
         companies = db.execute(
             'SELECT * FROM Company'
         ).fetchall()
+
+        companies = [dict(company) for company in companies]
 
         return jsonify(companies), 200
     
@@ -81,8 +87,10 @@ def company():
         
         name = data.get('name')
 
-        # generate api key for the company
-        api_key = JWT().encode({
+        if name is None:
+            return jsonify({'error': 'name is required'}), 400
+        
+        api_key = jwt.encode({
             'name': name
         },
         os.environ.get('SECRET_KEY', default='dev'),
@@ -124,23 +132,24 @@ def company():
         if company is None:
             return jsonify({'error': 'company id is invalid'}), 400
         
+        api_key = jwt.encode({
+            'name': name
+        },
+        os.environ.get('SECRET_KEY', default='dev'),
+        algorithm='HS256')
+        
         db.execute(
-            'UPDATE Company SET name = ? WHERE id = ?',
-            (name, company_id)
+            'UPDATE Company SET name = ?, api_key = ? WHERE id = ?',
+            (name, api_key, company_id)
         )
 
         db.commit()
 
-        return jsonify({'message': 'Company updated successfully'}), 200
+        return jsonify({'message': 'Company updated successfully', 'api-key': api_key}), 200
     
     elif request.method == 'DELETE':
-
-        data = request.get_json()
-
-        if data is None:
-            return jsonify({'error': 'JSON data is required'}), 400
         
-        company_id = data.get('id')
+        company_id = request.args.get('id')
 
         if company_id is None:
             return jsonify({'error': 'company id is required'}), 400
@@ -167,7 +176,7 @@ def company():
 @token_required
 def location():
     if request.method == 'GET':
-        company_id = request.args.get('id')
+        company_id = request.args.get('company_id')
 
         if company_id is None:
             return jsonify({'error': 'company id is required'}), 400
@@ -190,12 +199,16 @@ def location():
 
             if location is None:
                 return jsonify({'error': 'location id is invalid'}), 400
+            
+            location = dict(location)
 
             return jsonify(location), 200
 
         locations = db.execute(
             'SELECT * FROM Location WHERE company_id = ?', (company_id,)
         ).fetchall()
+
+        locations = [dict(location) for location in locations]
 
         return jsonify(locations), 200
     
@@ -275,13 +288,8 @@ def location():
         return jsonify({'message': 'Location updated successfully'}), 200
     
     elif request.method == 'DELETE':
-
-        data = request.get_json()
-
-        if data is None:
-            return jsonify({'error': 'JSON data is required'}), 400
         
-        loc_id = data.get('id')
+        loc_id = request.args.get('id')
 
         if loc_id is None:
             return jsonify({'error': 'location id is required'}), 400
@@ -307,25 +315,12 @@ def location():
 @v1_adm.route('sensor', methods=('GET', 'POST', 'PUT', 'DELETE'))
 @token_required
 def sensor():
-    '''
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    location_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    category TEXT NOT NULL,
-    meta TEXT NOT NULL,
-    api_key TEXT NOT NULL
-    
-    consider this schema for the sensor table
-    GET: returns all sensors for a location, if given an id returns the sensor with that id
-    POST: creates a sensor for a location
-    PUT: updates a sensor
-    DELETE: deletes a sensor
-    '''
     if request.method == 'GET':
         company_id = request.args.get('company_id')
+        loc_id = request.args.get('location_id')
 
-        if company_id is None:
-            return jsonify({'error': 'company id is required'}), 400
+        if company_id is None or loc_id is None:
+            return jsonify({'error': 'company id and location id are required'}), 400
         
         db = get_db()
 
@@ -336,11 +331,6 @@ def sensor():
         if company is None:
             return jsonify({'error': 'company id is invalid'}), 400
         
-        loc_id = request.args.get('location_id')
-
-        if loc_id is None:
-            return jsonify({'error': 'location id is required'}), 400
-        
         location = db.execute(
             'SELECT * FROM Location WHERE id = ?', (loc_id,)
         ).fetchone()
@@ -348,7 +338,7 @@ def sensor():
         if location is None:
             return jsonify({'error': 'location id is invalid'}), 400
         
-        sensor_id = request.args.get('id')
+        sensor_id = request.args.get('sensor_id')
 
         if sensor_id is not None:
             sensor = db.execute(
@@ -357,12 +347,16 @@ def sensor():
 
             if sensor is None:
                 return jsonify({'error': 'sensor id is invalid'}), 400
+            
+            sensor = dict(sensor)
 
             return jsonify(sensor), 200
 
         sensors = db.execute(
             'SELECT * FROM Sensor WHERE location_id = ?', (loc_id,)
         ).fetchall()
+
+        sensors = [dict(sensor) for sensor in sensors]
 
         return jsonify(sensors), 200
     
@@ -372,20 +366,8 @@ def sensor():
 
         if data is None:
             return jsonify({'error': 'JSON data is required'}), 400
-
-        company_id = data.get('company_id')
-
-        if company_id is None:
-            return jsonify({'error': 'company id is required'}), 400
         
         db = get_db()
-
-        company = db.execute(
-            'SELECT * FROM Company WHERE id = ?', (company_id,)
-        ).fetchone()
-
-        if company is None:
-            return jsonify({'error': 'company id is invalid'}), 400
         
         loc_id = data.get('location_id')
 
@@ -406,10 +388,11 @@ def sensor():
         if name is None or category is None or meta is None:
             return jsonify({'error': 'name, category and meta are required'}), 400
         
-        api_key = JWT().encode({
+        api_key = jwt.encode({
             'name': name,
             'category': category,
-            'meta': meta
+            'meta': meta,
+            'id': db.cursor().lastrowid
         },
         os.environ.get('SECRET_KEY', default='dev'),
         algorithm='HS256')
@@ -450,6 +433,14 @@ def sensor():
         if sensor is None:
             return jsonify({'error': 'sensor id is invalid'}), 400
         
+        api_key = jwt.encode({
+            'name': name,
+            'category': category,
+            'meta': meta
+        },
+        os.environ.get('SECRET_KEY', default='dev'),
+        algorithm='HS256')
+        
         db.execute(
             'UPDATE Sensor SET name = ?, category = ?, meta = ? WHERE id = ?',
             (name, category, meta, sensor_id)
@@ -457,16 +448,11 @@ def sensor():
 
         db.commit()
 
-        return jsonify({'message': 'Sensor updated successfully'}), 200
+        return jsonify({'message': 'Sensor updated successfully', 'api-key': api_key}), 200
     
     elif request.method == 'DELETE':
-
-        data = request.get_json()
-
-        if data is None:
-            return jsonify({'error': 'JSON data is required'}), 400
         
-        sensor_id = data.get('id')
+        sensor_id = request.args.get('id')
 
         if sensor_id is None:
             return jsonify({'error': 'sensor id is required'}), 400
