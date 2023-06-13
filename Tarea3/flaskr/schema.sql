@@ -34,3 +34,14 @@ CREATE TABLE IF NOT EXISTS Sensor (
     api_key TEXT NOT NULL,
     FOREIGN KEY (location_id) REFERENCES Location(id)
 );
+
+CREATE TABLE IF NOT EXISTS SensorData (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sensor_id INTEGER NOT NULL,
+    humedad FLOAT,
+    temperatura FLOAT,
+    fecha UNSIGNED BIG INT,
+    luminosidad FLOAT,
+    potencia_senal FLOAT,
+    FOREIGN KEY (sensor_id) REFERENCES Sensor(id)
+)
